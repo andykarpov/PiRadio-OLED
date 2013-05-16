@@ -1,12 +1,12 @@
 [submodule "ino/lib/Adafruit_SSD1306"]
 	path = ino/lib/Adafruit_SSD1306
-	url = git://github.com/andykarpov/Adafruit_SSD1306
+	url = git://github.com/andykarpov/Adafruit_SSD1306.git
 [submodule "ino/lib/Adafruit_GFX"]
 	path = ino/lib/Adafruit_GFX
-	url = git://github.com/andykarpov/Adafruit-GFX-Library
+	url = git://github.com/andykarpov/Adafruit-GFX-Library.git
 [submodule "ino/lib/PT2314"]
 	path = ino/lib/PT2314
-	url = git://github.com/andykarpov/PT2314
+	url = git://github.com/andykarpov/PT2314.git
 [submodule "ino/lib/Encoder"]
 	path = ino/lib/Encoder
-	url = git://github.com/andykarpov/Encoder
+	url = git://github.com/andykarpov/Encoder.git
