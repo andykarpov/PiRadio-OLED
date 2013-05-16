@@ -1,0 +1,10 @@
+[Unit]
+Description=Arduino Frontend for Music Player Daemon
+After=mpd.service
+
+[Service]
+ExecStart=/home/pi/PiRadio/run-radio.sh 
+
+[Install]
+WantedBy=multi-user.target
+

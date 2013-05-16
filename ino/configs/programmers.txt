@@ -1,0 +1,5 @@
+# See: http://code.google.com/p/arduino/wiki/Platforms
+
+gpio.name=RaspberryPi GPIO programmer
+gpio.protocol=gpio
+

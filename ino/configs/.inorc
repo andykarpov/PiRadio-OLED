@@ -1,0 +1,9 @@
+[build]
+board-model = atmega328nx
+
+[upload]
+board-model = atmega328nx
+serial-port = gpio
+
+[serial]
+serial-port = /dev/null
