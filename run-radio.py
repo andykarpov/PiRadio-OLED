@@ -268,8 +268,13 @@ class Program:
     state = None
     active_song = 0
     active_volume = 0
+    alarm_hours = 0
+    alarm_minutes = 0
+    alarm_on = False
+    alarm_changed = False
     last_active_song = 0
     last_changed = 0
+    alarm_last_changed = 0
     last_time = 0
     interface = None
 
@@ -292,11 +297,15 @@ class Program:
 
         # get active song from saved state
         self.state = State()
-        self.active_song = self.state.load()
+		if self.state.load():
+        	self.active_song = self.state.active_song
+            self.alarm_hours = self.state.alarm_hours
+            self.alarm_minutes = self.state.alarm_minutes
+            self.alarm_on = self.state.alarm_on
         self.last_active_song = self.active_song
 
         # init serial encoder instance
-        self.interface = Interface(self.active_song, 0, len(self.playlist.list) - 1, self.playlist.list)
+        self.interface = Interface(self.active_song, 0, len(self.playlist.list) - 1, self.playlist.list, self.alarm_hours, self.alarm_minutes, self.alarm_on)
 
         # play active song
         self.mpd.play(self.active_song)
@@ -334,10 +343,19 @@ class Main:
             if self.program.interface.volume != self.program.active_volume:
                 self.program.active_volume = self.program.interface.volume
 
-            if self.program.millis() - self.program.last_changed >= Config.save_timeout and self.program.last_active_song != self.program.active_song:
-                self.program.last_active_song = self.program.active_song
-                self.program.mpd.play(self.program.active_song)
-                self.program.state.save(self.program.active_song)
+            if self.program.interface.alarm_hours != self.program.alarm_hours or self.program.interface.alarm_minutes != self.program.alarm_minutes or self.program.interface.alarm_on != self.program.alarm_on:
+	           self.program.alarm_hours = self.program.interface.alarm_hours
+	           self.program.alarm_minutes = self.program.interface.alarm_minutes
+	           self.program.alarm_on = self.program.interface.alarm_on
+	           self.program.last_alarm_changed = self.program.millis()
+	           self.program.alarm_changed = True
+
+            if self.program.millis() - self.program.last_changed >= Config.save_timeout and (self.program.last_active_song != self.program.active_song or self.program.alarm_changed):
+				if (self.program.last_active_song != self.program.active_song):
+                	self.program.last_active_song = self.program.active_song
+                	self.program.mpd.play(self.program.active_song)
+                self.program.state.save(self.program.active_song, self.program.alarm_hours, self.program.alarm_minutes, self.program.alarm_on)
+				self.program.alarm_changed = False
 
             # fetch time
             self.texts[4] = datetime.now().strftime("%H:%M")
