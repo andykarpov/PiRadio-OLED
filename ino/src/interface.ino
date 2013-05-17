@@ -287,11 +287,15 @@ void AppToneTreble() {
   updateDisplay(true, tones[1]);
 }
 
+/**
+ * Application: alarm set 
+ */
 void AppSetAlarm() {
 
   if (mode_changed) {
     mode_changed = false;
     submode = 0;
+    setEncoder(alarm_hours);
   }
 
   if (btn == btn_encoder && current - last_submode >= DELAY_MODE) {
@@ -791,31 +795,33 @@ void updateDisplay(boolean show_progress, int percentage) {
     display.setCursor(0,0);
     display.println(title);
 
-    display.setCursor(0,15);
-    int station_id = station + 1;
-    int station_count = max_stations + 1;
-    itoa(station_id, cbuf, 10);
-    display.print(cbuf);
-    display.print(" / ");
-    itoa(station_count, cbuf, 10);
-    display.print(cbuf);
+    if (init_done) {
+    	display.setCursor(0,15);
+    	int station_id = station + 1;
+    	int station_count = max_stations + 1;
+    	itoa(station_id, cbuf, 10);
+    	display.print(cbuf);
+    	display.print(" / ");
+    	itoa(station_count, cbuf, 10);
+    	display.print(cbuf);
 
-    if (alarm_on) {
-      display.drawBitmap(71, 15, icon_alarm_bmp, 16, 8, 1);
+    	if (alarm_on) {
+      		display.drawBitmap(71, 15, icon_alarm_bmp, 16, 8, 1);
+    	}
+
+    	display.setCursor(90,15);
+    	sprintf(cbuf, "%d%d", (time_hours>9) ? (time_hours/10) : 0, time_hours%10);
+    	display.print(cbuf);
+    	display.print((blink_on) ? ":" : " ");
+    	sprintf(cbuf, "%d%d", (time_minutes>9) ? (time_minutes/10) : 0, time_minutes%10);
+    	display.print(cbuf);
+
+    	display.setCursor(0,46);
+    	display.println(song1);
+
+    	display.setCursor(0,55);
+    	display.println(song2);
     }
-
-    display.setCursor(90,15);
-    sprintf(cbuf, "%d%d", (time_hours>9) ? (time_hours/10) : 0, time_hours%10);
-    display.print(cbuf);
-    display.print((blink_on) ? ":" : " ");
-    sprintf(cbuf, "%d%d", (time_minutes>9) ? (time_minutes/10) : 0, time_minutes%10);
-    display.print(cbuf);
-
-    display.setCursor(0,30);
-    display.println(song1);
-
-    display.setCursor(0,45);
-    display.println(song2);
   }
   
   display.display();
