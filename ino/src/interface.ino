@@ -25,9 +25,7 @@
 
 #define NUM_READINGS 1 // number of analog reading to average it's value
 #define SERIAL_SPEED 9600 // serial port speed
-#define SERIAL_BUF_LEN 64 // serial reading buffer
-
-#define NUM_MODES 3 // number of app modes
+#define SERIAL_BUF_LEN 32 // serial reading buffer
 
 #define EEPROM_ADDRESS_OFFSET 400 // address offset to start reading/wring to the EEPROM 
 
@@ -61,6 +59,8 @@ int max_stations = 0; // max stations value
 int vol = 0; // current volume value
 int prev_vol = 0; // previous volume value
 int max_vol = 100; // max volume value
+int audio_channel = 0; // audio channel num
+int attenuation = 100; // attenuation level
 
 unsigned long last_vol = 0; // timestamp of last volume changed
 unsigned long last_enc = 0; // timestamp of last encoder changed
@@ -71,7 +71,11 @@ char t[ROWS][COLS+1]; // LCD buffer
 enum app_mode_e {
   app_mode_station = 0,
   app_mode_tone_bass,
-  app_mode_tone_treble
+  app_mode_tone_treble,
+  app_mode_set_alarm,
+  app_mode_alarm,
+  app_mode_clock1,
+  app_mode_clock2
 };
 
 // enum with button names
@@ -89,13 +93,20 @@ enum e_buttons {
 
 int btn = btn_none; // pressed button id
 int mode = app_mode_station; // mode set to default (station display)
+int submode = 0; // submode - used in some apps
 bool mode_changed = true; // mode button has been pressed
 unsigned long last_mode = 0; // timestamp of last mode changed
+unsigned long last_submode = 0; // timestamp of last submode changed
 
 int tones[2]; // bass, treble
 int prev_tones[2]; // bass, treble
 bool need_store = false; // flag if we need to store something to the EEPROM
 unsigned long last_tone = 0; // timestamp of last tone change
+
+int alarm_hours = 0; // alarm hours
+int alarm_minutes = 0; // alarm minutes
+bool alarm_on = false; // alarm on / off
+int alarm_tone = 0; // alarm tone preset
 
 const char str_loading1[] PROGMEM = "";
 const char str_loading2[] PROGMEM = "   BOOTING RADIO";
@@ -106,6 +117,17 @@ const char str_volume[] PROGMEM = "VOLUME ";
 const char str_bass[] PROGMEM = "BASS ";
 const char str_treble[] PROGMEM = "TREBLE ";
 const char str_station[] PROGMEM = "STATION ";
+
+static const unsigned char PROGMEM icon_alarm_bmp[] =
+{ 
+  B11111111, B11111111,
+  B11000001, B10111111,
+  B10111110, B10111111,
+  B10000000, B10111111,
+  B10111110, B10111111,
+  B10111110, B10000001,
+  B11111111, B11111111,
+  B00000000, B00000000 };
 
 void printProgStr(const char str[], int idx) {
   char c;
@@ -143,6 +165,9 @@ void setup() {
   
   // restore saved tone values from EEPROM
   restoreTones();
+
+  // restore saved alarm from EEPROM
+  restoreAlarm();
   
   // read volume knob position
   vol = readVolume();
@@ -165,12 +190,14 @@ void setup() {
 
 void powerOn() {
     power_on = true;
+    mode = app_mode_station;
     digitalWrite(POWER, HIGH);
     audio.init();
     sendPT2314();
     display.begin(SSD1306_EXTERNALVCC, 0x3D);
     display.clearDisplay();
     need_display = true;
+    mode_changed = true;
 }
 
 void powerOff() {
@@ -262,6 +289,162 @@ void AppToneTreble(unsigned long current) {
   updateDisplay(true, tones[1]);
 }
 
+void AppSetAlarm(unsigned long current) {
+
+  if (mode_changed) {
+    mode_changed = false;
+    submode = 0;
+    need_display = true;
+  }
+
+  if (btn == btn_encoder && current - last_submode >= DELAY_MODE) {
+    submode++;
+    if (submode >= 3) {
+      mode = app_mode_station;
+      submode = 0;
+    }
+    switch(submode) {
+      case 0:
+        setEncoder(alarm_hours);
+      break;
+      case 1:
+        setEncoder(alarm_minutes);
+      break;
+      case 2:
+        setEncoder((alarm_on) ? 1 : 0);
+      break;
+      case 3:
+        setEncoder(alarm_tone);
+      break;
+    }
+    last_submode = current;
+  }
+
+  display.clearDisplay();
+
+  switch (submode) {
+    case 0:
+      alarm_hours = readEncoder(23);
+      display.drawLine(0, 26, 30, 26, WHITE);
+      display.drawLine(0, 27, 30, 27, WHITE);
+    break;
+    case 1:
+      alarm_minutes = readEncoder(59);
+      display.drawLine(54, 26, 84, 26, WHITE);
+      display.drawLine(54, 27, 84, 27, WHITE);
+    break;
+    case 2:
+      alarm_on = (readEncoder(1) == 1) ? true : false;
+      if (alarm_on) {
+        display.drawLine(0, 42, 47, 42, WHITE);
+      } else {
+        display.drawLine(0, 42, 53, 42, WHITE);
+      }
+    break;
+    case 3:
+      alarm_tone = readEncoder(10);
+      // todo
+    break;
+  }
+
+  display.setTextSize(1);
+  display.setCursor(0,32);
+  if (alarm_on) {
+    display.println("ALARM ON");
+  } else {
+    display.println("ALARM OFF");
+  }
+  display.setCursor(0,0);
+  display.setTextSize(3);
+  char cbuf[4];
+  sprintf(cbuf, "%d%d", (alarm_hours>9) ? (alarm_hours/10) : 0, alarm_hours%10);
+  display.print(cbuf);
+  display.print(":");
+  sprintf(cbuf, "%d%d", (alarm_minutes>9) ? (alarm_minutes/10) : 0, alarm_minutes%10);
+  display.print(cbuf);
+  display.display();
+  // todo store eeprom with delay
+}
+
+void AppAlarm(unsigned long current) {
+  // todo
+}
+
+void AppClock1(unsigned long current) {
+  if (mode_changed) {
+    mode_changed = false;
+    setEncoder(station);
+  }
+  display.clearDisplay();
+  display.setCursor(4, 0);
+  display.setTextSize(4);
+  display.println(t[ROW_TIME]);  
+
+  if (init_done) {
+
+    station = readEncoder(max_stations);
+
+    if (station != prev_station) {
+      prev_station = station;
+      last_enc = current;
+      need_enc = true;
+      need_display = true;
+    }
+
+    // send encoder and volume to serial port with a small delay  
+    if ((need_enc) && (current - last_enc >= DELAY_ENCODER)) {
+      Serial.print(station);
+      Serial.print(":");
+      Serial.println(100);
+      need_enc = false;
+    }
+
+    display.setCursor(0,45);
+    display.setTextSize(1);
+    display.println(t[ROW_TITLE]);
+  }
+
+  display.display();
+}
+
+void AppClock2(unsigned long current) {
+  if (mode_changed) {
+    mode_changed = false;
+    setEncoder(station);
+  }
+  
+  display.clearDisplay();
+  display.setCursor(18, 0);
+  display.setTextSize(3);
+  display.println(t[ROW_TIME]);
+
+  if (init_done) {
+
+    station = readEncoder(max_stations);
+
+    if (station != prev_station) {
+      prev_station = station;
+      last_enc = current;
+      need_enc = true;
+      need_display = true;
+    }
+
+    // send encoder and volume to serial port with a small delay  
+    if ((need_enc) && (current - last_enc >= DELAY_ENCODER)) {
+      Serial.print(station);
+      Serial.print(":");
+      Serial.println(100);
+      need_enc = false;
+    }
+
+    display.setCursor(0,45);
+    display.setTextSize(1);
+    display.println(t[ROW_TITLE]);
+  }
+
+  display.display();
+}
+
 /**
  * Main application loop
  */ 
@@ -272,22 +455,16 @@ void loop() {
   vol = readVolume();
   btn = readKeyboard();
 
+  // global keys handler
   if (current - last_mode >= DELAY_MODE) {
     switch (btn) {
 
-      case btn_encoder:
-        last_mode = current;
-         if (mode == NUM_MODES-1) {
-           mode = 0;
-         } else {
-           mode = mode++;
-         }
-         mode_changed = true;
-      break;
-
+      // PRESET: loop via station / tone_bass / tone_treble modes
       case btn_preset:
         if (mode == app_mode_tone_bass) {
           mode = app_mode_tone_treble;
+        } else if (mode == app_mode_tone_treble) {
+          mode = app_mode_station;
         } else {
           mode = app_mode_tone_bass;
         }
@@ -295,12 +472,14 @@ void loop() {
         mode_changed = true;
       break;
 
+      // MENU/EXIT: exit to the station mode
       case btn_menu:
         mode = app_mode_station;
         last_mode = current;
         mode_changed = true;
       break;
 
+      // POWER: power on / off the radio
       case btn_power:
         power_on = !power_on;
         if (!power_on) {
@@ -312,7 +491,41 @@ void loop() {
         mode_changed = true;
       break;
 
-      // todo: other modes
+      // ALARM: set alarm time, on/off it.
+      case btn_alarm:
+          if (mode == app_mode_set_alarm) {
+            mode = app_mode_station;
+          } else {
+            mode = app_mode_set_alarm;
+          }
+          last_mode = current;
+          mode_changed = true;
+      break;
+
+      // MODE: switch between station / clock1 / clock2 modes
+      case btn_mode: 
+        if (mode == app_mode_station) {
+          mode = app_mode_clock1;
+        } else if (mode == app_mode_clock1) {
+          mode = app_mode_clock2;
+        } else {
+          mode = app_mode_station;
+        }
+        last_mode = current;
+        mode_changed = true;
+      break;
+
+      // INFO: temporary action: change audio channel
+      case btn_info:
+        if (audio_channel <3) {
+          audio_channel++;
+        } else {
+          audio_channel = 0;
+        }
+        sendPT2314();
+        last_mode = current;
+        mode_changed = true;
+      break;
 
     }
   }
@@ -348,6 +561,18 @@ void loop() {
       break;
       case app_mode_tone_treble:
         AppToneTreble(current);
+      break;
+      case app_mode_set_alarm:
+        AppSetAlarm(current);
+      break;
+      case app_mode_alarm:
+        AppAlarm(current);
+      break;
+      case app_mode_clock1:
+        AppClock1(current);
+      break;
+      case app_mode_clock2:
+        AppClock2(current);
       break;
     }
   }
@@ -402,13 +627,41 @@ void sendPT2314() {
   audio.volume(vol);
   audio.bass(tones[0]);
   audio.treble(tones[1]);
-  audio.channel(0);
+  audio.channel(audio_channel);
   if (power_on) {
     audio.loudnessOn();
     audio.muteOff();
   } else {
     audio.loudnessOff();
     audio.muteOn();
+  }
+}
+
+void restoreAlarm() {
+
+  byte value;
+  int addr = EEPROM_ADDRESS_OFFSET + 10;
+  value = EEPROM.read(addr);
+  if (value >= 0 && value <= 23) {
+    alarm_hours = value;
+  } else {
+    alarm_hours = 0;
+  }
+  value = EEPROM.read(addr+1);
+  if (value >= 0 && value <= 59) {
+    alarm_minutes = value;
+  } else {
+    alarm_minutes = 0;
+  }
+  value = EEPROM.read(addr+2);
+  if (value == 1) {
+    alarm_on = true;
+  } else {
+    alarm_on = false;
+  }
+  value = EEPROM.read(addr+3);
+  if (value >=0 && value <= 10) {
+    alarm_tone = value;
   }
 }
 
@@ -592,6 +845,9 @@ void updateDisplay(boolean show_progress, int percentage) {
     display.setCursor(0,15);
     display.println(t[ROW_STATION]);
 
+    if (alarm_on) {
+      display.drawBitmap(71, 15, icon_alarm_bmp, 16, 8, 1);
+    }
     display.setCursor(90,15);
     display.println(t[ROW_TIME]);
 
