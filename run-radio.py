@@ -19,7 +19,7 @@ def debug(message):
 class Config:
 
     COLS = 21
-    ROWS = 5
+    ROWS = 3
 
     debug = True
 
@@ -28,6 +28,7 @@ class Config:
 
     playlist = "/home/pi/PiRadio/data/radio.m3u"
     state = "/home/pi/PiRadio/data/state.txt"
+    alarm = "/home/pi/PiRadio/data/alarm.txt"
     save_timeout = 500
 
     mpd_host = "localhost"
@@ -53,25 +54,29 @@ class Interface:
     min_volume = 0
     max_volume = 100
 
+    alarm_hours = 0
+    alarm_minutes = 0
+    alarm_on = False
+
     stations = []
 
-    def __init__(self, encoder=0, min_value=0, max_value=0, stations=[]):
+    def __init__(self, encoder=0, min_value=0, max_value=0, stations=[], alarm_hours=0, alarm_minutes=0, alarm_on = False):
         self.encoder = encoder
         self.min_value = min_value
         self.max_value = max_value
         self.stations = stations
+        self.alarm_hours = alarm_hours
+        self.alarm_minutes = alarm_minutes
+        self.alarm_on = alarm_on
         self.try_serial()
 
     def send_init(self):
-	# put some line feeds before actual init
-	self.serial.write("\r\n");
-	time.sleep(Config.write_delay);
-	self.serial.write("\r\n");
-	time.sleep(Config.write_delay);
-	# put D (done) command with initial encoder value and max encoder value
-        self.serial.write('D:' + str(self.encoder) + ':' + str(self.max_value) + "\r\n")
-        debug("write: " + 'D:' + str(self.encoder) + ':' + str(self.max_value))
-        time.sleep(Config.write_delay)
+        # put some line feeds before actual init
+        self.try_write("");
+        self.try_write("")
+        self.try_write('TM:' + datetime.now().strftime("%H:%M"))
+        self.try_write('AL:' + str(self.alarm_hours) + ':' + str(self.alarm_minutes) + ':' + str(self.alarm_on))
+        self.try_write('D:' + str(self.encoder) + ':' + str(self.max_value))
 
     def try_serial(self):
         for serial_dev in Config.serial_dev:
@@ -109,21 +114,21 @@ class Interface:
                     self.send_init()
                     init_request = True
                 elif ln != "":
-                    parts = ln.split(":", 2)
-                    self.encoder = int(parts[0])
-                    self.volume = int(parts[1])
-                    if self.volume <= 2:
-                        self.volume = 0
-                    if self.volume >= 98:
-                        self.volume = 100
+                    parts = ln.split(":")
+                    if (parts[0] == 'E'):
+                        self.encoder = int(parts[0])
+                    if (parts[0] == 'A')
+                        self.alarm_hours = parts[1]
+                        self.alarm_minutes = parts[2]
+                        if (parts[3] == '1')
+                            self.alarm_on = True
+                        else 
+                            self.alarm_on = False
             elif not self.serial_connected:
                 self.try_serial()
             return init_request
         except Exception as e:
             return None
-
-    def set_enc(self, value):
-        return self.try_write('E:' + str(value))
 
 
 class PollerError(Exception):
@@ -337,7 +342,7 @@ class Main:
             # fetch time
             self.texts[4] = datetime.now().strftime("%H:%M")
             if (self.texts[4] != self.last_texts[4]):
-                self.program.interface.try_write('T5:' + self.texts[4])
+                self.program.interface.try_write('TM:' + self.texts[4])
                 self.last_texts[4] = self.texts[4]
 
             # fetch current song from mpd every 500ms
@@ -360,16 +365,12 @@ class Main:
 
                 self.last_current_song = self.program.millis()
 
-            # print station, pos and song title
+            # print station title
             station = self.program.playlist.list[self.program.active_song]
             self.texts[0] = station.name.upper()
-            self.texts[1] = str(self.program.active_song + 1) + ' / ' + str(len(self.program.playlist.list))
             if self.texts[0] != self.last_texts[0]:
-                self.program.interface.try_write('T1:' + self.texts[0])
+                self.program.interface.try_write('S0:' + self.texts[0])
                 self.last_texts[0] = self.texts[0]
-            #if self.texts[1] != self.last_texts[1]:
-            #    self.program.interface.try_write('T2:' + self.texts[1])
-            #    self.last_texts[1] = self.texts[1]
 
             part = textwrap.wrap(self.current_song, 20)
             if len(part) >= 2:
@@ -380,11 +381,11 @@ class Main:
                 self.texts[3] = self.current_song
 
             if self.texts[2] != self.last_texts[2]:
-                self.program.interface.try_write('T3:' + self.texts[2])
+                self.program.interface.try_write('S1:' + self.texts[2])
                 self.last_texts[2] = self.texts[2]
 
             if self.texts[3] != self.last_texts[3]:
-                self.program.interface.try_write('T4:' + self.texts[3])
+                self.program.interface.try_write('S2:' + self.texts[3])
                 self.last_texts[3] = self.texts[3]
 
             time.sleep(Config.read_delay)
@@ -392,23 +393,43 @@ class Main:
 
 class State:
 
+    active_menu = 0
+    alarm_hours = 0
+    alarm_minutes = 0
+    alarm_on = False
+
     def load(self):
         try:
             result = 0
             fsrc = codecs.open(Config.state, mode="r", encoding="utf-8")
             ln = fsrc.readline().strip()
             if ln != "":
-                result = int(ln)
+	            parts = ln.split(":")
+                self.active_menu = int(parts[0])
+                self.alarm_hours = int(parts[1])
+                self.alarm_minutes = int(parts[2])
+                if (parts[3] == '1')
+                    self.alarm_on = True
             fsrc.close()
-            return result
+            return True
         except Exception as e:
             debug("Unable to load state: " + e.message)
-            return 0
+            return False
 
-    def save(self, active_menu):
+    def save(self, active_menu, alarm_hours, alarm_minutes, alarm_on):
         try:
             fsrc = codecs.open(Config.state, mode="w", encoding="utf-8")
             fsrc.write(str(active_menu))
+            fsrc.write(':')
+            fsrc.write(str(alarm_hours))
+            fsrc.write(':')
+            fsrc.write(str(alarm_minutes))
+            fsrc.write(':')
+            if (alarm_on)
+                fsrc.write('1')
+            else 
+                fsrc.write('0')
+            fsrc.write(str(alarm_on))             
             fsrc.close()
         except Exception as e:
             debug("Unable to store state: " + e.message)

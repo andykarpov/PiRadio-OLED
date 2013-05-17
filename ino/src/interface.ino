@@ -24,6 +24,7 @@
 
 #define DELAY_VOLUME 3000 // volume bar show decay  
 #define DELAY_ENCODER 100 // delay between sending encoder changes back to Pi 
+#define DELAY_ALARM 100 // delay between sending alarm changes back to Pi
 #define DELAY_MODE 400 // mode switch debounce delay
 #define DELAY_EEPROM 10000 // delay to store to the EEPROM
 #define DELAY_BLINK 500 // bink delay
@@ -58,6 +59,7 @@ unsigned long current = 0; // current timestamp
 unsigned long last_vol = 0; // timestamp of last volume changed
 unsigned long last_enc = 0; // timestamp of last encoder changed
 unsigned long last_blink = 0; // timestamp of last blink state changed
+unsigned long last_alarm = 0; // timestamp of last alarm state changed
 
 char title[COLS+1]; // LCD buffer for title
 char song1[COLS+1]; // LCD buffer for song row1
@@ -111,6 +113,9 @@ int day = 0; // date day
 int alarm_hours = 0; // alarm hours
 int alarm_minutes = 0; // alarm minutes
 bool alarm_on = false; // alarm on / off
+int prev_alarm_hours = 0;
+int prev_alarm_minutes = 0;
+bool prev_alarm_on  = false;
 int alarm_tone = 0; // alarm tone preset
 
 const char str_booting[] PROGMEM = "   BOOTING RADIO";
@@ -250,9 +255,7 @@ void AppStation() {
       
     // send encoder and volume to serial port with a small delay  
     if ((need_enc) && (current - last_enc >= DELAY_ENCODER)) {
-      Serial.print(station);
-      Serial.print(":");
-      Serial.println(100);
+      sendStation();
       need_enc = false;
     }
   }
@@ -316,19 +319,33 @@ void AppSetAlarm() {
 
   display.clearDisplay();
 
+  bool need_alarm = false;
+ 
   switch (submode) {
     case 0:
       alarm_hours = readEncoder(23);
+      if (alarm_hours != prev_alarm_hours) {
+        prev_alarm_hours = alarm_hours;
+        need_alarm = true;
+      }
       display.drawLine(0, 26, 30, 26, (blink_on) ? WHITE : BLACK);
       display.drawLine(0, 27, 30, 27, (blink_on) ? WHITE : BLACK);
     break;
     case 1:
       alarm_minutes = readEncoder(59);
+      if (alarm_minutes != prev_alarm_minutes) {
+        prev_alarm_minutes = alarm_minutes;
+        need_alarm = true;
+      }
       display.drawLine(54, 26, 84, 26, (blink_on) ? WHITE : BLACK);
       display.drawLine(54, 27, 84, 27, (blink_on) ? WHITE : BLACK);
     break;
     case 2:
       alarm_on = (readEncoder(1) == 1) ? true : false;
+      if (alarm_on != prev_alarm_on) {
+        prev_alarm_on = alarm_on;
+        need_alarm = true;
+      }
       if (alarm_on) {
         display.drawLine(0, 42, 47, 42, (blink_on) ? WHITE : BLACK);
       } else {
@@ -358,7 +375,12 @@ void AppSetAlarm() {
   sprintf(cbuf, "%d%d", (alarm_minutes>9) ? (alarm_minutes/10) : 0, alarm_minutes%10);
   display.print(cbuf);
   display.display();
-  // todo store eeprom with delay
+  
+  if (need_alarm) {
+    sendAlarm();
+    need_alarm = false;
+  }
+  
 }
 
 void AppAlarm() {
@@ -392,9 +414,7 @@ void AppClock1() {
 
     // send encoder and volume to serial port with a small delay  
     if ((need_enc) && (current - last_enc >= DELAY_ENCODER)) {
-      Serial.print(station);
-      Serial.print(":");
-      Serial.println(100);
+      sendStation();
       need_enc = false;
     }
 
@@ -698,30 +718,35 @@ void setEncoder(int value) {
      char *arg3 = strtok(NULL, ":");
      if (strlen(buf) == 0 || cmd == NULL) return;  
 
+     // station title
      if (strcmp(cmd,"S0") == 0) {
          strcpy(title, arg1);
      } 
 
+     // current playing song row 1
      if (strcmp(cmd, "S1") == 0) {
          strcpy(song1, arg1);
      }
-
+     
+     // current playing song row 2
      if (strcmp(cmd, "S2") == 0) {
          strcpy(song2, arg1);
      }
 
+     // current time HH:MM
      if (strcmp(cmd, "TM") == 0) {
          time_hours = atoi(arg1);
          time_minutes = atoi(arg2);
      }
      
+     // current alarm settings HH:MM:on/off
      if (strcmp(cmd, "AL") == 0) {
        alarm_hours = atoi(arg1);
        alarm_minutes = atoi(arg2);
        alarm_on = (strcmp(arg3, "1") == 0) ? true : false;
      }
           
-     // done init
+     // done init <encoder value>:<max value>
      if (strcmp(cmd, "D") == 0) {
        station = atoi(arg1);
        max_stations = atoi(arg2);
@@ -732,6 +757,20 @@ void setEncoder(int value) {
        prev_vol = -1; // force show volume
      }
  }
+ 
+void sendStation() {
+  Serial.print("E:");
+  Serial.println(station);
+}
+
+void sendAlarm() {
+  Serial.print("A:");
+  Serial.print(alarm_hours);
+  Serial.print(":");
+  Serial.print(alarm_minutes);
+  Serial.print(":");
+  Serial.println(alarm_on);
+}
  
 void updateDisplay(boolean show_progress, int percentage) {
 
