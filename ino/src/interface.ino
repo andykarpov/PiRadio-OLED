@@ -14,14 +14,7 @@
 #include <PT2314.h>
 #include <EEPROM.h>
 
-#define ROWS 6 // number of display rows
 #define COLS 21 // number of display columns
-#define ROW_TITLE 0
-#define ROW_STATION 1
-#define ROW_SONG1 2
-#define ROW_SONG2 3
-#define ROW_TIME 4
-#define ROW_MODE 5
 
 #define NUM_READINGS 1 // number of analog reading to average it's value
 #define SERIAL_SPEED 9600 // serial port speed
@@ -33,6 +26,7 @@
 #define DELAY_ENCODER 100 // delay between sending encoder changes back to Pi 
 #define DELAY_MODE 400 // mode switch debounce delay
 #define DELAY_EEPROM 10000 // delay to store to the EEPROM
+#define DELAY_BLINK 500 // bink delay
 
 #define OLED_RESET 4 // oled display reset pin
 #define POWER 5 // D5 connected to power control transistor
@@ -48,9 +42,9 @@ const char sep = ':';  // incoming command separator
 bool buffering = true; // buffering mode, default to On
 bool need_enc = false; // need to send encoder value to the Pi backend, default to false
 bool need_vol = false; // need to send volume value to the Pi backend, default to false
-bool need_display = false; // need to refresh display
 bool init_done = false; // boot done (pyradio service has been started and sent initial data), default to false
 bool power_on = true; // power on state
+bool blink_on = true; // blink state
 
 int station = 0; // current station value
 int prev_station = 0; // previous encoder value
@@ -59,13 +53,17 @@ int max_stations = 0; // max stations value
 int vol = 0; // current volume value
 int prev_vol = 0; // previous volume value
 int max_vol = 100; // max volume value
-int audio_channel = 0; // audio channel num
-int attenuation = 100; // attenuation level
 
+unsigned long current = 0; // current timestamp
 unsigned long last_vol = 0; // timestamp of last volume changed
 unsigned long last_enc = 0; // timestamp of last encoder changed
+unsigned long last_blink = 0; // timestamp of last blink state changed
 
-char t[ROWS][COLS+1]; // LCD buffer
+char title[COLS+1]; // LCD buffer for title
+char song1[COLS+1]; // LCD buffer for song row1
+char song2[COLS+1]; // LCD buffer for song row2
+char pstr_buf[COLS+1]; // LCD buffer for special command titles
+char cbuf[5]; // LCD buffer for int to string conversion
 
 // enum with application states
 enum app_mode_e {
@@ -103,20 +101,27 @@ int prev_tones[2]; // bass, treble
 bool need_store = false; // flag if we need to store something to the EEPROM
 unsigned long last_tone = 0; // timestamp of last tone change
 
+int time_hours = 0; // time hours
+int time_minutes = 0; // time minutes
+
+int year = 0; // date year
+int month = 0; // date month
+int day = 0; // date day
+
 int alarm_hours = 0; // alarm hours
 int alarm_minutes = 0; // alarm minutes
 bool alarm_on = false; // alarm on / off
 int alarm_tone = 0; // alarm tone preset
 
-const char str_loading1[] PROGMEM = "";
-const char str_loading2[] PROGMEM = "   BOOTING RADIO";
-const char str_loading3[] PROGMEM = "   PLEASE WAIT...";
-const char str_loading4[] PROGMEM = "";
+const char str_booting[] PROGMEM = "   BOOTING RADIO";
+const char str_please_wait[] PROGMEM = "   PLEASE WAIT...";
 
 const char str_volume[] PROGMEM = "VOLUME ";
 const char str_bass[] PROGMEM = "BASS ";
 const char str_treble[] PROGMEM = "TREBLE ";
 const char str_station[] PROGMEM = "STATION ";
+const char str_alarm_on[] PROGMEM = "ALARM ON";
+const char str_alarm_off[] PROGMEM = "ALARM OFF";
 
 static const unsigned char PROGMEM icon_alarm_bmp[] =
 { 
@@ -129,15 +134,19 @@ static const unsigned char PROGMEM icon_alarm_bmp[] =
   B11111111, B11111111,
   B00000000, B00000000 };
 
-void printProgStr(const char str[], int idx) {
+/**
+ * Print progmem string into the pstr_buf
+ */
+void printProgStr(const char str[]) {
+  pstr_buf[0] = '\0';
   char c;
   int i = 0;
   if(!str) return;
   while((c = pgm_read_byte(str++))) {
-    t[idx][i] = c;
+    pstr_buf[i] = c;
     i++;
   }
-  t[idx][i] = '\0'; 
+  pstr_buf[i] = '\0'; 
 }
 
 /**
@@ -166,9 +175,6 @@ void setup() {
   // restore saved tone values from EEPROM
   restoreTones();
 
-  // restore saved alarm from EEPROM
-  restoreAlarm();
-  
   // read volume knob position
   vol = readVolume();
   
@@ -178,6 +184,7 @@ void setup() {
   // start i2c master
   Wire.begin();
 
+  // init hardware (audio processor, display, etc)
   powerOn();
 
   // setup serial
@@ -196,7 +203,6 @@ void powerOn() {
     sendPT2314();
     display.begin(SSD1306_EXTERNALVCC, 0x3D);
     display.clearDisplay();
-    need_display = true;
     mode_changed = true;
 }
 
@@ -210,21 +216,17 @@ void powerOff() {
 
 /**
  * Application mode to handle station display
- * @param unsigned long current - current timestamp
  */
-void AppStation(unsigned long current) {
+void AppStation() {
   
   if (mode_changed) {
     if (mode_changed && !init_done) {
-      printProgStr(str_loading1, ROW_TITLE);
-      printProgStr(str_loading2, ROW_STATION);
-      printProgStr(str_loading3, ROW_SONG1);
-      printProgStr(str_loading4, ROW_SONG2);
+      printProgStr(str_booting);
+      strcpy(title, pstr_buf);
       updateDisplay(false, 0);
     }
     mode_changed = false;
     setEncoder(station);
-    need_display = true;
   }
   
   if (init_done) {
@@ -232,23 +234,18 @@ void AppStation(unsigned long current) {
     station = readEncoder(max_stations);
   
     if (station != prev_station) {
-      printStation(station);
       prev_station = station;
       last_enc = current;
       need_enc = true;
-      need_display = true;
     }
 
     if (current - last_vol <= DELAY_VOLUME) {
       if (need_vol) {
-          printProgStr(str_volume, ROW_MODE);
+          printProgStr(str_volume);
           updateDisplay(true, vol);
-          need_display = true;
       }
     } else {
-      if (need_display) {
         updateDisplay(false, 0);
-      }
     }
       
     // send encoder and volume to serial port with a small delay  
@@ -263,38 +260,35 @@ void AppStation(unsigned long current) {
 
 /**
  * Application mode to control Bass tone
- * @param unsigned long current - current timestamp
  */
-void AppToneBass(unsigned long current) {
+void AppToneBass() {
   if (mode_changed) {
     mode_changed = false;
     setEncoder(tones[0]);
   }
   tones[0] = readEncoder(100);
-  printProgStr(str_bass, ROW_MODE);
+  printProgStr(str_bass);
   updateDisplay(true, tones[0]);
 }
 
 /**
  * Application mode to control Treble tone
- * @param unsigned long current - current timestamp
  */
-void AppToneTreble(unsigned long current) {
+void AppToneTreble() {
  if (mode_changed) {
     mode_changed = false;
     setEncoder(tones[1]);
   }
   tones[1] = readEncoder(100);
-  printProgStr(str_treble, ROW_MODE);
+  printProgStr(str_treble);
   updateDisplay(true, tones[1]);
 }
 
-void AppSetAlarm(unsigned long current) {
+void AppSetAlarm() {
 
   if (mode_changed) {
     mode_changed = false;
     submode = 0;
-    need_display = true;
   }
 
   if (btn == btn_encoder && current - last_submode >= DELAY_MODE) {
@@ -325,20 +319,20 @@ void AppSetAlarm(unsigned long current) {
   switch (submode) {
     case 0:
       alarm_hours = readEncoder(23);
-      display.drawLine(0, 26, 30, 26, WHITE);
-      display.drawLine(0, 27, 30, 27, WHITE);
+      display.drawLine(0, 26, 30, 26, (blink_on) ? WHITE : BLACK);
+      display.drawLine(0, 27, 30, 27, (blink_on) ? WHITE : BLACK);
     break;
     case 1:
       alarm_minutes = readEncoder(59);
-      display.drawLine(54, 26, 84, 26, WHITE);
-      display.drawLine(54, 27, 84, 27, WHITE);
+      display.drawLine(54, 26, 84, 26, (blink_on) ? WHITE : BLACK);
+      display.drawLine(54, 27, 84, 27, (blink_on) ? WHITE : BLACK);
     break;
     case 2:
       alarm_on = (readEncoder(1) == 1) ? true : false;
       if (alarm_on) {
-        display.drawLine(0, 42, 47, 42, WHITE);
+        display.drawLine(0, 42, 47, 42, (blink_on) ? WHITE : BLACK);
       } else {
-        display.drawLine(0, 42, 53, 42, WHITE);
+        display.drawLine(0, 42, 53, 42, (blink_on) ? WHITE : BLACK);
       }
     break;
     case 3:
@@ -350,27 +344,28 @@ void AppSetAlarm(unsigned long current) {
   display.setTextSize(1);
   display.setCursor(0,32);
   if (alarm_on) {
-    display.println("ALARM ON");
+    printProgStr(str_alarm_on);
+    display.println(pstr_buf);
   } else {
-    display.println("ALARM OFF");
+    printProgStr(str_alarm_off);
+    display.println(pstr_buf);
   }
   display.setCursor(0,0);
   display.setTextSize(3);
-  char cbuf[4];
   sprintf(cbuf, "%d%d", (alarm_hours>9) ? (alarm_hours/10) : 0, alarm_hours%10);
   display.print(cbuf);
-  display.print(":");
+  display.print((blink_on) ? ":" : " ");
   sprintf(cbuf, "%d%d", (alarm_minutes>9) ? (alarm_minutes/10) : 0, alarm_minutes%10);
   display.print(cbuf);
   display.display();
   // todo store eeprom with delay
 }
 
-void AppAlarm(unsigned long current) {
+void AppAlarm() {
   // todo
 }
 
-void AppClock1(unsigned long current) {
+void AppClock1() {
   if (mode_changed) {
     mode_changed = false;
     setEncoder(station);
@@ -378,45 +373,12 @@ void AppClock1(unsigned long current) {
   display.clearDisplay();
   display.setCursor(4, 0);
   display.setTextSize(4);
-  display.println(t[ROW_TIME]);  
-
-  if (init_done) {
-
-    station = readEncoder(max_stations);
-
-    if (station != prev_station) {
-      prev_station = station;
-      last_enc = current;
-      need_enc = true;
-      need_display = true;
-    }
-
-    // send encoder and volume to serial port with a small delay  
-    if ((need_enc) && (current - last_enc >= DELAY_ENCODER)) {
-      Serial.print(station);
-      Serial.print(":");
-      Serial.println(100);
-      need_enc = false;
-    }
-
-    display.setCursor(0,45);
-    display.setTextSize(1);
-    display.println(t[ROW_TITLE]);
-  }
-
-  display.display();
-}
-
-void AppClock2(unsigned long current) {
-  if (mode_changed) {
-    mode_changed = false;
-    setEncoder(station);
-  }
   
-  display.clearDisplay();
-  display.setCursor(18, 0);
-  display.setTextSize(3);
-  display.println(t[ROW_TIME]);
+  sprintf(cbuf, "%d%d", (time_hours>9) ? (time_hours/10) : 0, time_hours%10);
+  display.print(cbuf);
+  display.print((blink_on) ? ":" : " ");
+  sprintf(cbuf, "%d%d", (time_minutes>9) ? (time_minutes/10) : 0, time_minutes%10);
+  display.print(cbuf);
 
   if (init_done) {
 
@@ -426,7 +388,6 @@ void AppClock2(unsigned long current) {
       prev_station = station;
       last_enc = current;
       need_enc = true;
-      need_display = true;
     }
 
     // send encoder and volume to serial port with a small delay  
@@ -439,7 +400,7 @@ void AppClock2(unsigned long current) {
 
     display.setCursor(0,45);
     display.setTextSize(1);
-    display.println(t[ROW_TITLE]);
+    display.println(title);
   }
 
   display.display();
@@ -450,10 +411,16 @@ void AppClock2(unsigned long current) {
  */ 
 void loop() {
 
-  unsigned long current = millis();
+  current = millis();
     
   vol = readVolume();
   btn = readKeyboard();
+
+  // blink flag update
+  if (current - last_blink >= DELAY_BLINK) {
+    blink_on = !blink_on;
+    last_blink = current;
+  }
 
   // global keys handler
   if (current - last_mode >= DELAY_MODE) {
@@ -507,26 +474,11 @@ void loop() {
         if (mode == app_mode_station) {
           mode = app_mode_clock1;
         } else if (mode == app_mode_clock1) {
-          mode = app_mode_clock2;
-        } else {
           mode = app_mode_station;
         }
         last_mode = current;
         mode_changed = true;
       break;
-
-      // INFO: temporary action: change audio channel
-      case btn_info:
-        if (audio_channel <3) {
-          audio_channel++;
-        } else {
-          audio_channel = 0;
-        }
-        sendPT2314();
-        last_mode = current;
-        mode_changed = true;
-      break;
-
     }
   }
 
@@ -554,25 +506,22 @@ void loop() {
   if (power_on) {
     switch (mode) {
       case app_mode_station:
-        AppStation(current);
+        AppStation();
       break;
       case app_mode_tone_bass:
-        AppToneBass(current);
+        AppToneBass();
       break;
       case app_mode_tone_treble:
-        AppToneTreble(current);
+        AppToneTreble();
       break;
       case app_mode_set_alarm:
-        AppSetAlarm(current);
+        AppSetAlarm();
       break;
       case app_mode_alarm:
-        AppAlarm(current);
+        AppAlarm();
       break;
       case app_mode_clock1:
-        AppClock1(current);
-      break;
-      case app_mode_clock2:
-        AppClock2(current);
+        AppClock1();
       break;
     }
   }
@@ -627,41 +576,13 @@ void sendPT2314() {
   audio.volume(vol);
   audio.bass(tones[0]);
   audio.treble(tones[1]);
-  audio.channel(audio_channel);
+  audio.channel(0);
   if (power_on) {
     audio.loudnessOn();
     audio.muteOff();
   } else {
     audio.loudnessOff();
     audio.muteOn();
-  }
-}
-
-void restoreAlarm() {
-
-  byte value;
-  int addr = EEPROM_ADDRESS_OFFSET + 10;
-  value = EEPROM.read(addr);
-  if (value >= 0 && value <= 23) {
-    alarm_hours = value;
-  } else {
-    alarm_hours = 0;
-  }
-  value = EEPROM.read(addr+1);
-  if (value >= 0 && value <= 59) {
-    alarm_minutes = value;
-  } else {
-    alarm_minutes = 0;
-  }
-  value = EEPROM.read(addr+2);
-  if (value == 1) {
-    alarm_on = true;
-  } else {
-    alarm_on = false;
-  }
-  value = EEPROM.read(addr+3);
-  if (value >=0 && value <= 10) {
-    alarm_tone = value;
   }
 }
 
@@ -774,38 +695,30 @@ void setEncoder(int value) {
      char *cmd = strtok(buf, ":");
      char *arg1 = strtok(NULL, ":");
      char *arg2 = strtok(NULL, ":");
+     char *arg3 = strtok(NULL, ":");
      if (strlen(buf) == 0 || cmd == NULL) return;  
 
-     // command T1:<some text> will print text on the first line of the lcd
-     if (strcmp(cmd,"T1") == 0) {
-         strcpy(t[ROW_TITLE], arg1);
-         need_display = true;
+     if (strcmp(cmd,"S0") == 0) {
+         strcpy(title, arg1);
      } 
 
-     // command T2:<some text> will print text on the second line of the lcd
-     if (strcmp(cmd, "T2") == 0) {
-         strcpy(t[ROW_STATION], arg1);
-         need_display = true;
+     if (strcmp(cmd, "S1") == 0) {
+         strcpy(song1, arg1);
      }
 
-     // command T3:<some text> will print text on the third line of the lcd
-     if (strcmp(cmd, "T3") == 0) {
-         strcpy(t[ROW_SONG1], arg1);
-         need_display = true;
+     if (strcmp(cmd, "S2") == 0) {
+         strcpy(song2, arg1);
      }
 
-     // command T4:<some text> will print text on the fourth line of the lcd
-     if (strcmp(cmd, "T4") == 0) {
-         strcpy(t[ROW_SONG2], arg1);
-         need_display = true;
+     if (strcmp(cmd, "TM") == 0) {
+         time_hours = atoi(arg1);
+         time_minutes = atoi(arg2);
      }
-
-     // command T5:HH:MM
-     if (strcmp(cmd, "T5") == 0) {
-         strcpy(t[ROW_TIME], arg1);
-         strcat(t[ROW_TIME], ":");
-         strcat(t[ROW_TIME], arg2);
-         need_display = true;
+     
+     if (strcmp(cmd, "AL") == 0) {
+       alarm_hours = atoi(arg1);
+       alarm_minutes = atoi(arg2);
+       alarm_on = (strcmp(arg3, "1") == 0) ? true : false;
      }
           
      // done init
@@ -821,69 +734,60 @@ void setEncoder(int value) {
  }
  
 void updateDisplay(boolean show_progress, int percentage) {
-  
+
   display.clearDisplay();
   display.setTextColor(WHITE);
   
   if (show_progress) {
     display.setTextSize(2);
     display.setCursor(0, 15);
-    char tt[COLS+1];
-    char ib[4];
-    itoa(percentage, ib, 10);
-    strcpy(tt, t[ROW_MODE]);
-    strcat(tt, ib);
-    display.println(tt);
+    itoa(percentage, cbuf, 10);
+    display.print(pstr_buf);
+    display.print(cbuf);
     display.drawRect(0, 45, 127, 8, WHITE);
     display.fillRect(2, 47, map(percentage, 0, 100, 2, 123), 4, WHITE);
     
   } else {
     display.setTextSize(1);
     display.setCursor(0,0);
-    display.println(t[ROW_TITLE]);
+    display.println(title);
 
     display.setCursor(0,15);
-    display.println(t[ROW_STATION]);
+    int station_id = station + 1;
+    int station_count = max_stations + 1;
+    itoa(station_id, cbuf, 10);
+    display.print(cbuf);
+    display.print(" / ");
+    itoa(station_count, cbuf, 10);
+    display.print(cbuf);
 
     if (alarm_on) {
       display.drawBitmap(71, 15, icon_alarm_bmp, 16, 8, 1);
     }
+
     display.setCursor(90,15);
-    display.println(t[ROW_TIME]);
+    sprintf(cbuf, "%d%d", (time_hours>9) ? (time_hours/10) : 0, time_hours%10);
+    display.print(cbuf);
+    display.print((blink_on) ? ":" : " ");
+    sprintf(cbuf, "%d%d", (time_minutes>9) ? (time_minutes/10) : 0, time_minutes%10);
+    display.print(cbuf);
 
     display.setCursor(0,30);
-    display.println(t[ROW_SONG1]);
+    display.println(song1);
 
     display.setCursor(0,45);
-    display.println(t[ROW_SONG2]);
+    display.println(song2);
   }
   
   display.display();
-  need_display = false;
 }
 
 /**
  * Print station name and index into the LCD buffer
  */
 void printStation(int s) {
-
-    char ib[4];
-    int station_id = s + 1;
-    int station_count = max_stations + 1;
-  
-    t[ROW_STATION][0] = '\0';
-    // printProgStr(str_station, 1);
-
-    itoa(station_id, ib, 10);
-    strcat(t[ROW_STATION], ib);
-
-    strcat(t[ROW_STATION], " / ");
-
-    itoa(station_count, ib, 10);
-    strcat(t[ROW_STATION], ib);
-  
-    t[ROW_SONG1][0] = '\0';
-    t[ROW_SONG2][0] = '\0';
+    song1[0] = '\0';
+    song2[0] = '\0';
 }
 
 
