@@ -75,7 +75,10 @@ class Interface:
         self.try_write("");
         self.try_write("")
         self.try_write('TM:' + datetime.now().strftime("%H:%M"))
-        self.try_write('AL:' + str(self.alarm_hours) + ':' + str(self.alarm_minutes) + ':' + str(self.alarm_on))
+        alarm_on = 0
+        if (self.alarm_on == True):
+            alarm_on = 1
+        self.try_write('AL:' + str(self.alarm_hours) + ':' + str(self.alarm_minutes) + ':' + str(alarm_on))
         self.try_write('D:' + str(self.encoder) + ':' + str(self.max_value))
 
     def try_serial(self):
@@ -116,13 +119,13 @@ class Interface:
                 elif ln != "":
                     parts = ln.split(":")
                     if (parts[0] == 'E'):
-                        self.encoder = int(parts[0])
-                    if (parts[0] == 'A')
+                        self.encoder = int(parts[1])
+                    if (parts[0] == 'A'):
                         self.alarm_hours = parts[1]
                         self.alarm_minutes = parts[2]
-                        if (parts[3] == '1')
+                        if (parts[3] == '1'):
                             self.alarm_on = True
-                        else 
+                        else:
                             self.alarm_on = False
             elif not self.serial_connected:
                 self.try_serial()
@@ -274,7 +277,7 @@ class Program:
     alarm_changed = False
     last_active_song = 0
     last_changed = 0
-    alarm_last_changed = 0
+    last_alarm_changed = 0
     last_time = 0
     interface = None
 
@@ -297,12 +300,12 @@ class Program:
 
         # get active song from saved state
         self.state = State()
-		if self.state.load():
-        	self.active_song = self.state.active_song
+        if self.state.load():
+            self.active_song = self.state.active_menu
             self.alarm_hours = self.state.alarm_hours
             self.alarm_minutes = self.state.alarm_minutes
             self.alarm_on = self.state.alarm_on
-        self.last_active_song = self.active_song
+            self.last_active_song = self.active_song
 
         # init serial encoder instance
         self.interface = Interface(self.active_song, 0, len(self.playlist.list) - 1, self.playlist.list, self.alarm_hours, self.alarm_minutes, self.alarm_on)
@@ -344,18 +347,20 @@ class Main:
                 self.program.active_volume = self.program.interface.volume
 
             if self.program.interface.alarm_hours != self.program.alarm_hours or self.program.interface.alarm_minutes != self.program.alarm_minutes or self.program.interface.alarm_on != self.program.alarm_on:
-	           self.program.alarm_hours = self.program.interface.alarm_hours
-	           self.program.alarm_minutes = self.program.interface.alarm_minutes
-	           self.program.alarm_on = self.program.interface.alarm_on
-	           self.program.last_alarm_changed = self.program.millis()
-	           self.program.alarm_changed = True
+                self.program.alarm_hours = self.program.interface.alarm_hours
+                self.program.alarm_minutes = self.program.interface.alarm_minutes
+                self.program.alarm_on = self.program.interface.alarm_on
+                self.program.last_alarm_changed = self.program.millis()
+                self.program.alarm_changed = True
 
-            if self.program.millis() - self.program.last_changed >= Config.save_timeout and (self.program.last_active_song != self.program.active_song or self.program.alarm_changed):
-				if (self.program.last_active_song != self.program.active_song):
-                	self.program.last_active_song = self.program.active_song
-                	self.program.mpd.play(self.program.active_song)
+            if self.program.millis() - self.program.last_changed >= Config.save_timeout and self.program.last_active_song != self.program.active_song:
+                self.program.last_active_song = self.program.active_song
+                self.program.mpd.play(self.program.active_song)
                 self.program.state.save(self.program.active_song, self.program.alarm_hours, self.program.alarm_minutes, self.program.alarm_on)
-				self.program.alarm_changed = False
+
+            if self.program.millis() - self.program.last_alarm_changed >= Config.save_timeout and self.program.alarm_changed:
+                self.program.state.save(self.program.active_song, self.program.alarm_hours, self.program.alarm_minutes, self.program.alarm_on)
+                self.program.alarm_changed = False
 
             # fetch time
             self.texts[4] = datetime.now().strftime("%H:%M")
@@ -422,11 +427,11 @@ class State:
             fsrc = codecs.open(Config.state, mode="r", encoding="utf-8")
             ln = fsrc.readline().strip()
             if ln != "":
-	            parts = ln.split(":")
+                parts = ln.split(":")
                 self.active_menu = int(parts[0])
                 self.alarm_hours = int(parts[1])
                 self.alarm_minutes = int(parts[2])
-                if (parts[3] == '1')
+                if (parts[3] == '1'):
                     self.alarm_on = True
             fsrc.close()
             return True
@@ -443,11 +448,10 @@ class State:
             fsrc.write(':')
             fsrc.write(str(alarm_minutes))
             fsrc.write(':')
-            if (alarm_on)
+            if (alarm_on):
                 fsrc.write('1')
-            else 
+            else:
                 fsrc.write('0')
-            fsrc.write(str(alarm_on))             
             fsrc.close()
         except Exception as e:
             debug("Unable to store state: " + e.message)
