@@ -820,18 +820,21 @@ void updateDisplay(boolean show_progress, int percentage) {
       		display.drawBitmap(71, 15, icon_alarm_bmp, 16, 8, 1);
     	}
 
-    	display.setCursor(90,15);
+    	display.setCursor(97,15);
     	sprintf(cbuf, "%d%d", (time_hours>9) ? (time_hours/10) : 0, time_hours%10);
     	display.print(cbuf);
     	display.print((blink_on) ? ":" : " ");
     	sprintf(cbuf, "%d%d", (time_minutes>9) ? (time_minutes/10) : 0, time_minutes%10);
     	display.print(cbuf);
 
-    	display.setCursor(0,46);
+    	display.setCursor(0,43);
     	display.println(song1);
 
     	display.setCursor(0,55);
     	display.println(song2);
+
+    	display.drawRect(0, 28, 127, 8, WHITE);
+    	display.fillRect(2, 30, map(station_id, 0, station_count, 2, 123), 4, WHITE);
     }
   }
   
