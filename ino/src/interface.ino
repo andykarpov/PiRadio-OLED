@@ -301,7 +301,6 @@ void AppSetAlarm() {
   if (btn == btn_encoder && current - last_submode >= DELAY_MODE) {
     submode++;
     if (submode >= 3) {
-      mode = app_mode_station;
       submode = 0;
     }
     switch(submode) {
@@ -332,8 +331,10 @@ void AppSetAlarm() {
         prev_alarm_hours = alarm_hours;
         need_alarm = true;
       }
-      display.drawLine(0, 26, 30, 26, (blink_on) ? WHITE : BLACK);
-      display.drawLine(0, 27, 30, 27, (blink_on) ? WHITE : BLACK);
+      display.fillTriangle(16, 6, 16, 13, 12, 9, WHITE);
+      display.drawLine(19, 26, 49, 26, (blink_on) ? WHITE : BLACK);
+      display.drawLine(19, 27, 49, 27, (blink_on) ? WHITE : BLACK);
+      display.fillTriangle(54, 6, 54, 13, 58, 9, WHITE);
     break;
     case 1:
       alarm_minutes = readEncoder(59);
@@ -341,8 +342,10 @@ void AppSetAlarm() {
         prev_alarm_minutes = alarm_minutes;
         need_alarm = true;
       }
-      display.drawLine(54, 26, 84, 26, (blink_on) ? WHITE : BLACK);
-      display.drawLine(54, 27, 84, 27, (blink_on) ? WHITE : BLACK);
+      display.fillTriangle(70, 6, 70, 13, 66, 9, WHITE);
+      display.drawLine(73, 26, 103, 26, (blink_on) ? WHITE : BLACK);
+      display.drawLine(73, 27, 103, 27, (blink_on) ? WHITE : BLACK);
+      display.fillTriangle(108, 6, 108, 13, 112, 9, WHITE);
     break;
     case 2:
       alarm_on = (readEncoder(1) == 1) ? true : false;
@@ -350,10 +353,15 @@ void AppSetAlarm() {
         prev_alarm_on = alarm_on;
         need_alarm = true;
       }
+      display.fillTriangle(16, 46, 16, 53, 12, 49, WHITE); 
       if (alarm_on) {
-        display.drawLine(0, 42, 47, 42, (blink_on) ? WHITE : BLACK);
+        display.drawLine(19, 55, 66, 55, (blink_on) ? WHITE : BLACK);
+	display.drawLine(19, 56, 66, 56, (blink_on) ? WHITE : BLACK);
+        display.fillTriangle(68, 46, 68, 53, 72, 49, WHITE);
       } else {
-        display.drawLine(0, 42, 53, 42, (blink_on) ? WHITE : BLACK);
+        display.drawLine(19, 55, 72, 55, (blink_on) ? WHITE : BLACK);
+	display.drawLine(19, 56, 72, 56, (blink_on) ? WHITE : BLACK);
+        display.fillTriangle(74, 46, 74, 53, 78, 49, WHITE); 
       }
     break;
     case 3:
@@ -363,7 +371,7 @@ void AppSetAlarm() {
   }
 
   display.setTextSize(1);
-  display.setCursor(0,32);
+  display.setCursor(19,45);
   if (alarm_on) {
     printProgStr(str_alarm_on);
     display.println(pstr_buf);
@@ -371,12 +379,15 @@ void AppSetAlarm() {
     printProgStr(str_alarm_off);
     display.println(pstr_buf);
   }
-  display.setCursor(0,0);
+  display.setCursor(19,0);
   display.setTextSize(3);
   sprintf(cbuf, "%d%d", (alarm_hours>9) ? (alarm_hours/10) : 0, alarm_hours%10);
   display.print(cbuf);
-  display.print((blink_on) ? ":" : " ");
-  sprintf(cbuf, "%d%d", (alarm_minutes>9) ? (alarm_minutes/10) : 0, alarm_minutes%10);
+  if (submode == 2) {
+    display.print(":");
+  }
+  display.setCursor(73, 0);
+  sprintf(cbuf, "%d%d", (alarm_minutes>9) ? (alarm_minutes/10) : 0, alarm_minutes%10);  
   display.print(cbuf);
   display.display();
   
