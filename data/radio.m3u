@@ -27,6 +27,32 @@ http://pub4.di.fm:80/di_psychill_aac
 http://pub7.di.fm:80/di_drumandbass_aac
 #EXTINF:-1,The Eagle
 http://108.61.73.117:10002
+#EXTINF:-1,ROCKRADIO - Hard
+http://pub1.rockradio.com:80/rr_harderrock_aac
+#EXTINF:-1,ROCKRADIO - Metal
+http://pub6.rockradio.com:80/rr_metal_aac
+#EXTINF:-1,ROCKRADIO - Symphonic
+http://pub1.rockradio.com:80/rr_symphonicmetal_aac
+#EXTINF:-1,CrossFire-Radio
+http://www.crossfire-radio.com:8000
+#EXTINF:-1,MetalHeart
+http://listen.radionomy.com/metalheart
+#EXTINF:-1,Radio Metal
+http://stream.radiometal.com:8010
+#EXTINF:-1,Metalheadradio
+http://208.53.138.151:8032/
+#EXTINF:-1,Thrash Zone Radio
+http://listen.radionomy.com/thrash-zone-radio
+#EXTINF:-1,The Best Of HairRadio
+http://djravenwolf.serverroom.us:5770
+#EXTINF:-1,METALLURGY
+http://streampoint.radioio.com/streams/3109/45ec5ef00e475/
+#EXTINF:-1,Classic Rock Lounge
+http://listen.classicrocklounge.com:8000/mp3_128
+#EXTINF:-1,Guitar Spirit
+http://listen.radionomy.com/guitar-spirit
+#EXTINF:-1,ErrorFM's ROCKZILLA
+http://errorfm.com:8008
 #EXTINF:-1,ChroniX Metal
 http://173.192.45.18:10100
 #EXTINF:-1,CX Metal Masters
