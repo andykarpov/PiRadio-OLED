@@ -390,7 +390,8 @@ class Main:
 
             # print station title
             station = self.program.playlist.list[self.program.active_song]
-            self.texts[0] = station.name.upper()
+            part = textwrap.wrap(station.name, 21);
+            self.texts[0] = part[0].upper()
             if self.texts[0] != self.last_texts[0]:
                 self.program.interface.try_write('S0:' + self.texts[0])
                 self.last_texts[0] = self.texts[0]
