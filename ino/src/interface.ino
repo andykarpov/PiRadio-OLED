@@ -204,6 +204,7 @@ void powerOn() {
     power_on = true;
     mode = app_mode_station;
     digitalWrite(POWER, HIGH);
+    delay(200);
     audio.init();
     sendPT2314();
     display.begin(SSD1306_EXTERNALVCC, 0x3D);
@@ -213,6 +214,7 @@ void powerOn() {
 
 void powerOff() {
     power_on = false;
+    vol = 0;
     sendPT2314();
     display.clearDisplay();
     display.display();
